@@ -4,12 +4,13 @@ import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 import random
-from util import PriorityQueue, cycle
+from util import PriorityQueue, findMinCycle
+from python_tsp.exact import solve_tsp_dynamic_programming
 import sys
 
-NUM_POINTS = 100
-CLUSTERS = 5
-random.seed(420)
+NUM_POINTS = 30
+CLUSTERS = 2
+random.seed(10)
 
 A = []
 B = []
@@ -132,7 +133,18 @@ for i in range(len(kmeanAll.labels_)):
         cycleNodes.append(terminals[i])
 
 # Create a cycle
-
+distanceMatrix = []
+for tail in cycleNodes:
+    distances = []
+    for head in cycleNodes:
+        distances.append(distance(tail.getCoords(), head.getCoords()))
+    distanceMatrix.append(distances)
+# print(cycleTuple)
+# print(np.array(cycleTuple))
+cycle, _ = solve_tsp_dynamic_programming(np.array(distanceMatrix))
+cycle.append(cycle[0])
+# print(permutation)
+# print("cycle =", cycle)
 
 for node in cycleNodes:
     # Remove from the ones that will be clustered
@@ -178,6 +190,7 @@ terminals_y = np.array([terminal.y for terminal in terminals])
 plt.scatter(terminals_x, terminals_y, s=[10 for i in range(len(terminals_x))])
 
 # Draw lines
+# other clusters
 for tail in edges:
     for head in edges[tail]:
         if tail in A:
@@ -188,5 +201,11 @@ for tail in edges:
             x = (tail.x, head.x)
             y = (tail.y, head.y)
             plt.plot(x, y, color="red")
+
+# centre cluster
+for i in range(len(cycle) - 1):
+    x = (cycleNodes[cycle[i]].x, cycleNodes[cycle[i+1]].x)
+    y = (cycleNodes[cycle[i]].y, cycleNodes[cycle[i+1]].y)
+    plt.plot(x, y, color="gray")
 
 plt.show()
