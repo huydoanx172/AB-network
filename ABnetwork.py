@@ -1,21 +1,15 @@
 from sklearn.cluster import KMeans
-from kmeans import distance
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 import random
-from util import PriorityQueue, findMinCycle
+from util import PriorityQueue, findMinCycle, getEuclideanDistances, distance, findMinEdgeBetweenClusters, totalCost
 from python_tsp.exact import solve_tsp_dynamic_programming
 import sys
 
-NUM_POINTS = 30
-CLUSTERS = 2
+NUM_POINTS = 60
+CLUSTERS = 4
 random.seed(10)
-
-A = []
-B = []
-terminals = []
-edges = {}
 
 class Terminal:
     def __init__(self, x, y) -> None:
@@ -53,17 +47,9 @@ def prims(points):
     Take in a list of points in the Euclidean plane and return the minimum spanning
     tree as a list of points
     """
-    distances = {}
+    distances = getEuclideanDistances(points)
     visited = []
     MST = []
-
-    for i in range(len(points)):
-        distances[points[i]] = []
-        for j in range(len(points)):
-            if i == j:
-                distances[points[i]].append((points[i], float("inf")))
-            else:
-                distances[points[i]].append((points[j], distance(points[i].getCoords(), points[j].getCoords())))
 
     frontier = PriorityQueue()
     for edge in distances[points[0]]:
@@ -77,9 +63,6 @@ def prims(points):
             visited.append(newPoint)
             MST.append((potentialEdge[0], potentialEdge[1]))
             for edge in distances[newPoint]:
-                # print("node0 =", potentialEdge[0])
-                # print("edge[0] =", edge[0])
-                # print("edge[1] =", edge[1])
                 frontier.push((newPoint, edge[0]), edge[1])
 
     if len(visited) != len(points):
@@ -87,24 +70,30 @@ def prims(points):
         return None
     return MST
 
+A = []
+B = []
+terminals = []
+edges = {}
+
 # Initialize terminals
 for i in range(NUM_POINTS):
-    source = Source(random.randint(10, 500), random.randint(10, 500))
-    A.append(source)
-    edges[source] = []
-    sink = Sink(random.randint(10, 500), random.randint(10, 500))
-    B.append(sink)
-    edges[source] = []
-    edges[sink] = []
-    terminals.append(source)
-    terminals.append(sink)
+    # Randomly appoint whether a point is a source or a sink
+    isSource = random.choice([True, False])
+    if isSource:
+        newNode = Source(random.randint(10, 500), random.randint(10, 500))
+        A.append(newNode)
+    else: 
+        newNode = Sink(random.randint(10, 500), random.randint(10, 500))
+        B.append(newNode)
+    edges[newNode] = []
+    terminals.append(newNode)
 
 # Cluster the terminals
 kmeanAll = KMeans(n_clusters=CLUSTERS*2+1, n_init=10)
 kmeanSources = KMeans(n_clusters=CLUSTERS, n_init=10)
 kmeanSinks = KMeans(n_clusters=CLUSTERS, n_init=10)
-# Turn the middle cluster into a cycle. Cycle currently created just by a greedy
-# algorithm
+# Turn the middle cluster into a cycle. Cycle currently created using exact
+# TSP solver
 data = np.array([(terminal.x, terminal.y) for terminal in terminals])
 kmeanAll.fit(data)
 
@@ -113,7 +102,7 @@ centerCentroid = None
 centralIndex = 0
 for i in range(len(kmeanAll.cluster_centers_)):
     totalDist = 0
-    # print(kmeanAll.cluster_centers_[i])
+    
     for neighbor in kmeanAll.cluster_centers_:
         totalDist += distance(kmeanAll.cluster_centers_[i], neighbor)
     
@@ -122,45 +111,38 @@ for i in range(len(kmeanAll.cluster_centers_)):
         centerCentroid = kmeanAll.cluster_centers_[i]
         centralIndex = i
 
-# print(kmeanAll.cluster_centers_[centralIndex])
-# print("central index =", centralIndex)
-
+# Create a cycle using the nodes in the middle cluster
 cycleNodes = []
-# print("labels:")
-# print(kmeanAll.labels_)
+
 for i in range(len(kmeanAll.labels_)):
     if kmeanAll.labels_[i] == centralIndex:
         cycleNodes.append(terminals[i])
 
-# Create a cycle
 distanceMatrix = []
 for tail in cycleNodes:
     distances = []
     for head in cycleNodes:
         distances.append(distance(tail.getCoords(), head.getCoords()))
     distanceMatrix.append(distances)
-# print(cycleTuple)
-# print(np.array(cycleTuple))
+
 cycle, _ = solve_tsp_dynamic_programming(np.array(distanceMatrix))
 cycle.append(cycle[0])
-# print(permutation)
-# print("cycle =", cycle)
 
+# Cluster the remaining nodes separately
 for node in cycleNodes:
-    # Remove from the ones that will be clustered
     if node in A:
         A.remove(node)
     else:
         B.remove(node)
 
-# Cluster the sources and sinks
+# Cluster the sources and sinks separately
 data = np.array([(terminal.x, terminal.y) for terminal in A])
 kmeanSources.fit(data)
 data = np.array([(terminal.x, terminal.y) for terminal in B])
 kmeanSinks.fit(data)
 
+# Create an MST between points of the same type in the same cluster
 for i in range(CLUSTERS):
-    # Create an MST between points of the same type in the same cluster
     ACluster = []
     BCluster = []
     for j in range(len(kmeanSources.labels_)):
@@ -170,8 +152,6 @@ for i in range(CLUSTERS):
         if kmeanSinks.labels_[j] == i:
             BCluster.append(B[j])
 
-    # print(ACluster)
-    # print(BCluster)
     edges_to_add = prims(ACluster)
     for edge in edges_to_add:
         edges[edge[0]].append(edge[1])
@@ -180,14 +160,35 @@ for i in range(CLUSTERS):
     for edge in edges_to_add:
         edges[edge[0]].append(edge[1])
 
-# print("edges:")
-# print(edges)
+    # Connect the clusters with the middle cycle
+    minEdge = findMinEdgeBetweenClusters(cycleNodes, ACluster)
+    edges[minEdge[0]].append(minEdge[1])
+    minEdge = findMinEdgeBetweenClusters(cycleNodes, BCluster)
+    edges[minEdge[0]].append(minEdge[1])
+
+
+# Calculate the total length of the network
+print("Total cost of the network:", totalCost(edges))
+
+upperBoundMST = prims(terminals)
+upperBound = 0
+for edge in upperBoundMST:
+    upperBound += distance(edge[0].getCoords(), edge[1].getCoords())
+print("Upper bound of minimum spanning tree between all terminals:", upperBound)
 
 # Visualization
-# Draw points
-terminals_x = np.array([terminal.x for terminal in terminals])
-terminals_y = np.array([terminal.y for terminal in terminals])
-plt.scatter(terminals_x, terminals_y, s=[10 for i in range(len(terminals_x))])
+# Draw sources
+terminals_x = np.array([terminal.x for terminal in A])
+terminals_y = np.array([terminal.y for terminal in A])
+plt.scatter(terminals_x, terminals_y, s=[20 for i in range(len(terminals_x))], color="blue")
+# Draw sinks
+terminals_x = np.array([terminal.x for terminal in B])
+terminals_y = np.array([terminal.y for terminal in B])
+plt.scatter(terminals_x, terminals_y, s=[20 for i in range(len(terminals_x))], color="red")
+# Draw cycle nodes
+terminals_x = np.array([terminal.x for terminal in cycleNodes])
+terminals_y = np.array([terminal.y for terminal in cycleNodes])
+plt.scatter(terminals_x, terminals_y, s=[10 for i in range(len(terminals_x))], color="gray")
 
 # Draw lines
 # other clusters
@@ -196,11 +197,11 @@ for tail in edges:
         if tail in A:
             x = (tail.x, head.x)
             y = (tail.y, head.y)
-            plt.plot(x, y, color="green")
+            plt.plot(x, y, color="blue")
         else:
             x = (tail.x, head.x)
             y = (tail.y, head.y)
-            plt.plot(x, y, color="red")
+            plt.plot(x, y, color="blue")
 
 # centre cluster
 for i in range(len(cycle) - 1):

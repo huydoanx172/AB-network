@@ -1,5 +1,5 @@
 import heapq
-from kmeans import distance
+import numpy as np
 
 class PriorityQueue:
     """
@@ -38,20 +38,84 @@ class PriorityQueue:
             heapq.heappush(self.heap, entry)
             self.count += 1
 
-def cycle(points):
-    # # Return the sequence of terminals to form a cycle from the given terminals
-    # # Currently using a greedy algorithm
-    # distances = {}
-    # visited = []
-    # for i in range(len(points)):
-    #     distances[points[i]] = []
-    #     for j in range(len(points)):
-    #         if i == j:
-    #             distances[points[i]].append((points[i], float("inf")))
-    #         else:
-    #             distances[points[i]].append((points[j], distance(points[i].getCoords(), points[j].getCoords())))
+def findMinCycle(points):
+    # Return the sequence of terminals to form a cycle from the given terminals
+    # Currently using a greedy algorithm
+    distances = getEuclideanDistances(points)
+    visited = []
 
-    # for i in range(len(points)):
+    # Greedy algorithm starting from the first point
+    visited.append(points[0])
+    currPoint = points[0]
+    while len(visited) != len(points):
+        # remove the visited points from consideration
+        toRemove = []
+        for edge in distances[currPoint]:
+            if edge[0] in visited:
+                toRemove.append(edge)
+        for edge in toRemove:
+            distances[currPoint].remove(edge)
         
-    # return visited
-    pass
+        minEdge = min(distances[currPoint], key=lambda x: x[1])
+        visited.append(minEdge[0])
+        currPoint = minEdge[0]
+
+    visited.append(points[0])
+    return visited
+
+def getEuclideanDistances(points):
+    """
+    Given a list of Terminal objects, return a dictionary containing the 
+    distances of all edges between terminals
+    """
+    distances = {}
+    for i in range(len(points)):
+        distances[points[i]] = []
+        for j in range(len(points)):
+            if i == j:
+                distances[points[i]].append((points[i], float("inf")))
+            else:
+                distances[points[i]].append((points[j], distance(points[i].getCoords(), points[j].getCoords())))
+    
+    return distances
+
+def distance(a, b):
+    """
+    Given two points a and b represented as tuples in the Euclidean plane, return
+    the distance between them
+    """
+    dimensions = len(a)
+    
+    _sum = 0
+    for dimension in range(dimensions):
+        difference_sq = (a[dimension] - b[dimension]) ** 2
+        _sum += difference_sq
+    return np.sqrt(_sum)
+
+def findMinEdgeBetweenClusters(a, b):
+    """
+    Given two set of terminals a and b, return the shortest edge between a
+    point from a and a point from b
+    """
+    minDist = float("inf")
+    minEdge = None
+
+    for tail in a:
+        for head in b:
+            dist = distance(tail.getCoords(), head.getCoords())
+            if dist < minDist:
+                minDist = dist
+                minEdge = (tail, head)
+
+    return minEdge
+
+def totalCost(edges):
+    """
+    Given a dictionary of edges in a graph in the Euclidean plane, return the
+    total cost of all the edges
+    """
+    totalDist = 0
+    for tail in edges:
+        for head in edges[tail]:
+            totalDist += distance(tail.getCoords(), head.getCoords())
+    return totalDist
