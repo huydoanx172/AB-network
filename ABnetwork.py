@@ -3,12 +3,13 @@ import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 import random
-from util import PriorityQueue, findMinCycle, getEuclideanDistances, distance, findMinEdgeBetweenClusters, totalCost
+from util import PriorityQueue, getEuclideanDistances, distance, findMinEdgeBetweenClusters, totalCost
 from python_tsp.exact import solve_tsp_dynamic_programming
+from python_tsp.heuristics import solve_tsp_simulated_annealing
 import sys
 
-NUM_POINTS = 60
-CLUSTERS = 4
+NUM_POINTS = 50
+# CLUSTERS = 7
 random.seed(10)
 
 class Terminal:
@@ -70,111 +71,140 @@ def prims(points):
         return None
     return MST
 
-A = []
-B = []
-terminals = []
-edges = {}
+upperBounds = []
+for CLUSTERS in range(4, 21):
+    A = []
+    B = []
+    terminals = []
+    edges = {}
 
-# Initialize terminals
-for i in range(NUM_POINTS):
-    # Randomly appoint whether a point is a source or a sink
-    isSource = random.choice([True, False])
-    if isSource:
-        newNode = Source(random.randint(10, 500), random.randint(10, 500))
-        A.append(newNode)
-    else: 
-        newNode = Sink(random.randint(10, 500), random.randint(10, 500))
-        B.append(newNode)
-    edges[newNode] = []
-    terminals.append(newNode)
+    # Initialize terminals
+    for i in range(NUM_POINTS):
+        # Randomly appoint whether a point is a source or a sink
+        isSource = random.choice([True, False])
+        if isSource:
+            newNode = Source(random.randint(10, 500), random.randint(10, 500))
+            A.append(newNode)
+        else: 
+            newNode = Sink(random.randint(10, 500), random.randint(10, 500))
+            B.append(newNode)
+        edges[newNode] = []
+        terminals.append(newNode)
 
-# Cluster the terminals
-kmeanAll = KMeans(n_clusters=CLUSTERS*2+1, n_init=10)
-kmeanSources = KMeans(n_clusters=CLUSTERS, n_init=10)
-kmeanSinks = KMeans(n_clusters=CLUSTERS, n_init=10)
-# Turn the middle cluster into a cycle. Cycle currently created using exact
-# TSP solver
-data = np.array([(terminal.x, terminal.y) for terminal in terminals])
-kmeanAll.fit(data)
+    # Cluster the terminals
+    kmeanAll = KMeans(n_clusters=CLUSTERS, n_init=10)
 
-bestDist = float("inf")
-centerCentroid = None
-centralIndex = 0
-for i in range(len(kmeanAll.cluster_centers_)):
-    totalDist = 0
-    
-    for neighbor in kmeanAll.cluster_centers_:
-        totalDist += distance(kmeanAll.cluster_centers_[i], neighbor)
-    
-    if totalDist < bestDist:
-        bestDist = totalDist
-        centerCentroid = kmeanAll.cluster_centers_[i]
-        centralIndex = i
+    # Turn the middle cluster into a cycle. Cycle currently created using exact
+    # TSP solver
+    data = np.array([(terminal.x, terminal.y) for terminal in terminals])
+    kmeanAll.fit(data)
 
-# Create a cycle using the nodes in the middle cluster
-cycleNodes = []
+    bestDist = float("inf")
+    centerCentroid = None
+    centralIndex = 0
+    for i in range(len(kmeanAll.cluster_centers_)):
+        totalDist = 0
+        
+        for neighbor in kmeanAll.cluster_centers_:
+            totalDist += distance(kmeanAll.cluster_centers_[i], neighbor)
+        
+        if totalDist < bestDist:
+            bestDist = totalDist
+            centerCentroid = kmeanAll.cluster_centers_[i]
+            centralIndex = i
 
-for i in range(len(kmeanAll.labels_)):
-    if kmeanAll.labels_[i] == centralIndex:
-        cycleNodes.append(terminals[i])
+    # Create a cycle using the nodes in the middle cluster
+    cycleNodes = []
 
-distanceMatrix = []
-for tail in cycleNodes:
-    distances = []
-    for head in cycleNodes:
-        distances.append(distance(tail.getCoords(), head.getCoords()))
-    distanceMatrix.append(distances)
+    for i in range(len(kmeanAll.labels_)):
+        if kmeanAll.labels_[i] == centralIndex:
+            cycleNodes.append(terminals[i])
 
-cycle, _ = solve_tsp_dynamic_programming(np.array(distanceMatrix))
-cycle.append(cycle[0])
+    distanceMatrix = []
+    for tail in cycleNodes:
+        distances = []
+        for head in cycleNodes:
+            distances.append(distance(tail.getCoords(), head.getCoords()))
+        distanceMatrix.append(distances)
 
-# Cluster the remaining nodes separately
-for node in cycleNodes:
-    if node in A:
-        A.remove(node)
-    else:
-        B.remove(node)
+    cycle, _ = solve_tsp_dynamic_programming(np.array(distanceMatrix))
+    cycle.append(cycle[0])
+    for i in range(len(cycle) - 1):
+        edges[cycleNodes[cycle[i]]].append(cycleNodes[cycle[i+1]])
+        cycleNodes[cycle[i]].deg += 1
+        cycleNodes[cycle[i+1]].deg += 1
 
-# Cluster the sources and sinks separately
-data = np.array([(terminal.x, terminal.y) for terminal in A])
-kmeanSources.fit(data)
-data = np.array([(terminal.x, terminal.y) for terminal in B])
-kmeanSinks.fit(data)
+    # Create an MST between points in the same cluster and connect the tree with the
+    # middle cycle
+    minEdges = []
+    for i in range(CLUSTERS):
+        if i == centralIndex:
+            continue
 
-# Create an MST between points of the same type in the same cluster
-for i in range(CLUSTERS):
-    ACluster = []
-    BCluster = []
-    for j in range(len(kmeanSources.labels_)):
-        if kmeanSources.labels_[j] == i:
-            ACluster.append(A[j])
-    for j in range(len(kmeanSinks.labels_)):
-        if kmeanSinks.labels_[j] == i:
-            BCluster.append(B[j])
+        clusterNodes = []
+        for j in range(len(kmeanAll.labels_)):
+            if kmeanAll.labels_[j] == i:
+                clusterNodes.append(terminals[j])
 
-    edges_to_add = prims(ACluster)
-    for edge in edges_to_add:
-        edges[edge[0]].append(edge[1])
+        edgesToAdd = prims(clusterNodes)
+        for edge in edgesToAdd:
+            edges[edge[0]].append(edge[1])
+            edge[0].deg += 1
+            edge[1].deg += 1
+        minEdge = findMinEdgeBetweenClusters(cycleNodes, clusterNodes)
+        # Include i so it's easier to retrieve connected cluster later
+        minEdges.append((minEdge, i))
 
-    edges_to_add = prims(BCluster)
-    for edge in edges_to_add:
-        edges[edge[0]].append(edge[1])
+    # Find the cluster that is closest to the middle cycle first, because at least
+    # one cluster has to connect to the middle cycle
+    minMinEdge = min(minEdges, key=lambda x: distance(x[0][0].getCoords(), x[0][1].getCoords()))
+    edges[minMinEdge[0][0]].append(minMinEdge[0][1])
+    connectedIndex = minMinEdge[1]
 
-    # Connect the clusters with the middle cycle
-    minEdge = findMinEdgeBetweenClusters(cycleNodes, ACluster)
-    edges[minEdge[0]].append(minEdge[1])
-    minEdge = findMinEdgeBetweenClusters(cycleNodes, BCluster)
-    edges[minEdge[0]].append(minEdge[1])
+    # For the other clusters, either connect to the middle cycle or the nearest cluster
+    for i in range(CLUSTERS):
+        if i == centralIndex or i == connectedIndex:
+            continue
 
+        ithClusterNodes = []
+        for j in range(len(kmeanAll.labels_)):
+            if kmeanAll.labels_[j] == i:
+                ithClusterNodes.append(terminals[j])
+        minClusterEdges = []
+        for j in range(CLUSTERS):
+            if j in (centralIndex, connectedIndex, i):
+                continue
+            
+            jthClusterNodes = []
+            for k in range(len(kmeanAll.labels_)):
+                if kmeanAll.labels_[k] == j:
+                    jthClusterNodes.append(terminals[k])
 
-# Calculate the total length of the network
-print("Total cost of the network:", totalCost(edges))
+            minClusterEdge = findMinEdgeBetweenClusters(ithClusterNodes, jthClusterNodes)
+            minClusterEdges.append(minClusterEdge)
+        
+        minMinClusterEdge = min(minClusterEdges, key=lambda x: distance(x[0].getCoords(), x[1].getCoords()))
+        cycleEdge = findMinEdgeBetweenClusters(ithClusterNodes, cycleNodes)
+        edgeToAdd = min((minMinClusterEdge, cycleEdge), key=lambda x: distance(x[0].getCoords(), x[1].getCoords()))
+        # print(f"({edgeToAdd[0]}, {edgeToAdd[1]})")
+        edges[edgeToAdd[0]].append(edgeToAdd[1])
+            
 
-upperBoundMST = prims(terminals)
-upperBound = 0
-for edge in upperBoundMST:
-    upperBound += distance(edge[0].getCoords(), edge[1].getCoords())
-print("Upper bound of minimum spanning tree between all terminals:", upperBound)
+    # Calculate the total length of the network
+    print(f"Total cost of the network using kmeans with {CLUSTERS} clusters:", totalCost(edges))
+
+    # Calculate the upper bound which is a TSP of all the terminals
+    distanceMatrix = []
+    for tail in terminals:
+        distances = []
+        for head in terminals:
+            distances.append(distance(tail.getCoords(), head.getCoords()))
+        distanceMatrix.append(distances)
+
+    upperBoundTSP, upperBound = solve_tsp_simulated_annealing(np.array(distanceMatrix))
+    upperBounds.append(upperBound)
+
+print("Upper bound of approximate TSP between all terminals:", min(upperBounds))
 
 # Visualization
 # Draw sources
@@ -194,14 +224,9 @@ plt.scatter(terminals_x, terminals_y, s=[10 for i in range(len(terminals_x))], c
 # other clusters
 for tail in edges:
     for head in edges[tail]:
-        if tail in A:
-            x = (tail.x, head.x)
-            y = (tail.y, head.y)
-            plt.plot(x, y, color="blue")
-        else:
-            x = (tail.x, head.x)
-            y = (tail.y, head.y)
-            plt.plot(x, y, color="blue")
+        x = (tail.x, head.x)
+        y = (tail.y, head.y)
+        plt.plot(x, y, color="orange")
 
 # centre cluster
 for i in range(len(cycle) - 1):

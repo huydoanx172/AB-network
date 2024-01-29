@@ -107,6 +107,10 @@ def findMinEdgeBetweenClusters(a, b):
                 minDist = dist
                 minEdge = (tail, head)
 
+    if not minEdge:
+        print("error in findMinEdge function")
+        print("i cluster:", a)
+        print("j cluster:", b)
     return minEdge
 
 def totalCost(edges):
@@ -119,3 +123,14 @@ def totalCost(edges):
         for head in edges[tail]:
             totalDist += distance(tail.getCoords(), head.getCoords())
     return totalDist
+
+def cluster(points, num_clusters=6, type="kmeans"):
+    """
+    Given a list of terminals, cluster them based on the given clustering
+    algorithm and number of clusters. Then, return a dictionary with keys
+    corresponding to the cluster indexes and the value associated is the list
+    of indexes of points belonging to that cluster
+    """
+
+    if type == "kmeans":
+        pass
